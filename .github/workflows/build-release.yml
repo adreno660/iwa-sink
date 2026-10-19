@@ -45,6 +45,18 @@ jobs:
         route: GET /repos/${{ github.repository }}/git/matching-refs/tags
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Restore Signing Certificate File
+      run: |
+        mkdir -p certs
+        if [ -n "${{ secrets.KEY }}" ]; then
+          echo "${{ secrets.KEY }}" > ./certs/encrypted_key.pem
+          echo "Production signing key restored from secrets."
+        else
+          echo "No KEY secret found! Generating a temporary fallback development key."
+          npx wbn-sign gen-key ./certs/encrypted_key.pem --passphrase "${{ secrets.KEY_PASSPHRASE || 'password' }}"
+        fi
+
     - name: Build
       run: pnpm bump && pnpm build
       env:
