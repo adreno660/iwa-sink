@@ -6,11 +6,12 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   test-build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
     - name: Checkout
       uses: actions/checkout@v4
@@ -36,8 +37,14 @@ jobs:
       id: tag_version
       uses: mathieudutour/github-tag-action@v6.2
       with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
+        github_token: ${{ secrets.REPO_TOKEN }}
         default_bump: minor
+        default_prerelease_bump: prerelease
+        tag_prefix: v
+        release_branches: master,main
+        create_annotated_tag: false
+        fetch_all_tags: false
+        dry_run: false
 
     - name: Get all tags
       uses: octokit/request-action@v2.x
@@ -45,7 +52,7 @@ jobs:
       with:
         route: GET /repos/${{ github.repository }}/git/matching-refs/tags
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.REPO_TOKEN }}
 
     - name: Ensure signing key
       id: ensure_key
@@ -57,6 +64,7 @@ jobs:
 
         write_key_from_input() {
           input="$1"
+          # If input looks like PEM, write directly; otherwise treat as base64 and decode.
           if echo "$input" | grep -q "-----BEGIN"; then
             printf '%s\n' "$input" > ./certs/encrypted_key.pem
           else
@@ -64,13 +72,14 @@ jobs:
           fi
         }
 
-        if [ -n "${{ secrets.KEY }}" ]; then
+        if [ -n "${{ secrets.KEY || '' }}" ]; then
           echo "Using KEY secret from repository"
           write_key_from_input "${{ secrets.KEY }}"
+          # Export raw PEM to later steps
           echo "KEY<<EOF" >> $GITHUB_ENV
           cat ./certs/encrypted_key.pem >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
-          echo "KEY_PASSPHRASE=${{ secrets.KEY_PASSPHRASE }}" >> $GITHUB_ENV
+          echo "KEY_PASSPHRASE=${{ secrets.KEY_PASSPHRASE || '' }}" >> $GITHUB_ENV
         else
           echo "No KEY secret — generating ephemeral RSA key (not persisted)"
           openssl genpkey -algorithm RSA -out ./certs/encrypted_key.pem -pkeyopt rsa_keygen_bits:2048
@@ -91,6 +100,7 @@ jobs:
     - name: Create release
       uses: ncipollo/release-action@v1
       with:
+        token: ${{ secrets.REPO_TOKEN }}
         tag: ${{ steps.tag_version.outputs.new_tag }}
         name: Release ${{ steps.tag_version.outputs.new_tag }}
         body: ${{ steps.tag_version.outputs.changelog }}
